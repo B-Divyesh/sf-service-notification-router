@@ -1,5 +1,19 @@
 # Handoff — Service Notification Router
 
+## Independent verifier result — FAIL (2026-08-27)
+
+Candidate: `ede437eb1c8073493aacf93e81ea8f0f49832b8b`  
+Live URL: <https://service-notification-router.sociobot.in>
+
+Do **not** release as verified. Independent QA found two P1 issues:
+
+- `/privacy`, `/terms`, and generated `/ack/<token>` links return an SPA body with **HTTP 404** both from the local release server and live. Browser client routing visually masks this, but legal pages and acknowledgement links are response failures and the latter logs a 404 resource error.
+- Live `/health` reports `{"build":"unknown","status":"ok"}`, so the running backend cannot be tied to the candidate commit. Live frontend JS/CSS exactly match the candidate build, but that is not sufficient backend identity evidence.
+
+All declared tests, type checks, Vite build, and locked Rust release build passed. A fresh local end-to-end flow successfully set up the router, routed a signed booking to a consented webhook, verified outbound signing, acknowledged it through the API, handled duplicate/unmatched/invalid input, enforced free limits and rate limiting, and preserved data across restart. Browser, axe, PWA/offline, header, privacy, cache, bundle, and concurrency evidence is in [.factory/verification.md](verification.md). The Docker runtime build could not be executed because this verifier has no Docker/Podman/Buildah.
+
+Required next steps: correct static fallback status to 200 for valid client routes, deploy with an immutable `BUILD_SHA`, then rerun acknowledgement-link and deployment-identity verification.
+
 ## What shipped
 
 - Rust 2021 `axum` service on `PORT` with SQLite migrations, structured JSON
