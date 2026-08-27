@@ -6,9 +6,9 @@
   routes. Each serves the SPA index with HTTP `200`, instead of the previous
   static fallback that returned the index body with a `404` status.
 - The container build embeds a full immutable Git commit SHA in the Rust
-  binary. It accepts an explicit `BUILD_SHA`, normalizes it to a commit, or
-  derives it from the build-context checkout; an invalid or absent identity
-  fails the image build instead of exposing `build: "unknown"` from `/health`.
+  binary. The fixed deployment helper supplies `BUILD_SHA` from the source
+  commit; an invalid or absent identity fails the image build instead of
+  exposing `build: "unknown"` from `/health`.
 - Regressions cover all three public client-route status responses and the
   exact compile-time build identity returned by `/health`.
 
@@ -28,8 +28,8 @@ curl http://localhost:8080/health
 ```
 
 The health response must contain the same full SHA supplied to the build.
-The fixed container deployment path may omit the argument because the
-Dockerfile derives the same SHA from its checked-out source context.
+The fixed container deployment helper supplies that value from `git rev-parse
+HEAD`; Docker builds invoked directly must pass it explicitly as above.
 
 ## Verification performed 2026-08-27
 

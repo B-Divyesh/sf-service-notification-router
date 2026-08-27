@@ -95,8 +95,8 @@ docker run --rm -p 8080:8080 -v router-data:/data \
 ```
 
 `GET /health` reports the full immutable commit SHA compiled into the image.
-The Dockerfile rejects an invalid build identity and, when the deployment path
-does not pass `BUILD_SHA`, derives it from the checked-out source commit.
+The Dockerfile rejects an absent or invalid build identity; the fixed container
+deployment path supplies `BUILD_SHA` from the source commit.
 
 Production deployments must use HTTPS, persistent storage, an SMTP relay when
 email is enabled, and a protected backup of both `router.db` and `router.key`.

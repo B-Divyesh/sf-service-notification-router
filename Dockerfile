@@ -6,20 +6,17 @@ COPY frontend/ ./
 RUN npm run build
 
 FROM rust:1.98-alpine AS api-build
-RUN apk add --no-cache git musl-dev
+RUN apk add --no-cache musl-dev
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY migrations ./migrations
 COPY src ./src
-# The deployment path can pass BUILD_SHA explicitly. When it does not, the
-# source checkout is used to derive the exact immutable commit being built.
-# A missing or invalid identity fails the image build instead of shipping
-# `unknown` from /health.
-COPY .git ./.git
+# The fixed deployment path supplies the full immutable commit SHA. Refuse to
+# compile an image without it rather than shipping `unknown` from /health.
 ARG BUILD_SHA
-RUN build_sha="${BUILD_SHA:-$(git rev-parse HEAD)}"; \
-    build_sha="$(git rev-parse --verify "${build_sha}^{commit}")"; \
-    BUILD_SHA="$build_sha" cargo build --locked --release
+RUN test "${#BUILD_SHA}" -eq 40; \
+    printf '%s' "$BUILD_SHA" | grep -Eq '^[0-9a-f]{40}$'; \
+    BUILD_SHA="$BUILD_SHA" cargo build --locked --release
 
 FROM alpine:3.22 AS runtime
 RUN apk add --no-cache ca-certificates && addgroup -S router && adduser -S -G router -h /app router
