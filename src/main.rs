@@ -131,6 +131,13 @@ async fn main() -> anyhow::Result<()> {
 
 pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
     let index = frontend_dir.join("index.html");
+    // Serve known browser entry points directly rather than through ServeDir's
+    // not-found handler. That handler preserves a 404 status when it returns
+    // an index file, making valid legal and acknowledgment URLs look failed.
+    let client_routes = Router::new()
+        .route_service("/privacy", ServeFile::new(index.clone()))
+        .route_service("/terms", ServeFile::new(index.clone()))
+        .route_service("/ack/{token}", ServeFile::new(index.clone()));
     let api = Router::new()
         .route("/health", get(routes::health))
         .route("/api/status", get(routes::status))
@@ -170,6 +177,7 @@ pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
 
     Router::new()
         .merge(api)
+        .merge(client_routes)
         .fallback_service(ServeDir::new(frontend_dir).not_found_service(ServeFile::new(index)))
         .with_state(state.clone())
         .layer(axum::middleware::from_fn(cache_headers))
@@ -325,6 +333,48 @@ mod integration_tests {
 
     async fn json_body(response: axum::response::Response) -> Value {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn public_client_routes_return_index_with_http_ok() {
+        let (app, _state, dir) = test_app().await;
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<!doctype html><html><head><title>Router</title></head><body><main>Client shell</main></body></html>",
+        )
+        .unwrap();
+
+        for path in ["/privacy", "/terms", "/ack/a-valid-client-token"] {
+            let response = app
+                .clone()
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "{path} must be a successful document route"
+            );
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(std::str::from_utf8(&body).unwrap().contains("Client shell"));
+        }
+    }
+
+    #[tokio::test]
+    async fn health_returns_the_exact_compiled_build_identity() {
+        let (app, _state, _dir) = test_app().await;
+        let response = app
+            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["status"], "ok");
+        assert_eq!(
+            body["build"],
+            option_env!("BUILD_SHA").unwrap_or("development"),
+            "/health must expose the compile-time build identity exactly"
+        );
     }
 
     #[tokio::test]

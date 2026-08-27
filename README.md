@@ -89,10 +89,14 @@ verification, encrypted ingest, route matching, failed-provider handling, and
 acknowledgment. Build and run the production container with:
 
 ```sh
-docker build --build-arg BUILD_SHA=$(git rev-parse --short HEAD) -t service-notification-router .
+docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t service-notification-router .
 docker run --rm -p 8080:8080 -v router-data:/data \
   -e PUBLIC_BASE_URL=http://localhost:8080 service-notification-router
 ```
+
+`GET /health` reports the full immutable commit SHA compiled into the image.
+The Dockerfile rejects an invalid build identity and, when the deployment path
+does not pass `BUILD_SHA`, derives it from the checked-out source commit.
 
 Production deployments must use HTTPS, persistent storage, an SMTP relay when
 email is enabled, and a protected backup of both `router.db` and `router.key`.
