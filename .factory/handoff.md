@@ -2,7 +2,7 @@
 
 ## Independent verifier result — FAIL (2026-08-27)
 
-Candidate: `ede437eb1c8073493aacf93e81ea8f0f49832b8b`  
+Candidate: `ede437eb1c8073493aacf93e81ea8f0f49832b8b`
 Live URL: <https://service-notification-router.sociobot.in>
 
 Do **not** release as verified. Independent QA found two P1 issues:
