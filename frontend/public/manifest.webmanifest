@@ -1,0 +1,9 @@
+{
+  "name": "Service Notification Router",
+  "short_name": "Router",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5EBD8",
+  "theme_color": "#F5EBD8",
+  "icons": [{"src":"/mark.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
