@@ -1,6 +1,8 @@
-node_modules/
-dist/
-.env
+/target/
+/data/
+/frontend/node_modules/
+/frontend/dist/
+/.graphify-out/
+/graphify-out/
+/.lighthouseci/
 *.log
-graphify-out/
-.DS_Store
