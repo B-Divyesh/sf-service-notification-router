@@ -1,0 +1,11 @@
+{
+  "slug": "service-notification-router",
+  "title": "Service Notification Router",
+  "territory": "utilities",
+  "user": "A micro-clinic, studio, or multi-service office where a booking must alert the right service coordinator without giving every staff member every booking notification.",
+  "smallest_useful_product": "Self-hosted rules endpoint: receive a normalized booking webhook, map service/provider to a recipient, add an acknowledgment link, and purge payloads after a configured interval.",
+  "success_measure": "In a 30-day pilot, 95% of booking notices reach the configured responsible recipient and shared-group notification volume falls by at least 60%.",
+  "artifact_class": "web-with-backend",
+  "monetization": "one-time",
+  "constraints": "Obtain consent for email/SMS channels; verify webhook signatures; encrypt retained data; comply with provider messaging policies and do not automate unsolicited outreach."
+}
