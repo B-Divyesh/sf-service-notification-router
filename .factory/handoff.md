@@ -1,59 +1,33 @@
-# Handoff — Service Notification Router repair
+# Handoff — Service Notification Router verification 2
 
-## Release-blocking fixes
+## PASS
 
-- `/privacy`, `/terms`, and `/ack/<token>` are now explicit Axum document
-  routes. Each serves the SPA index with HTTP `200`, instead of the previous
-  static fallback that returned the index body with a `404` status.
-- The container build embeds a full immutable Git commit SHA in the Rust
-  binary. The fixed deployment helper supplies `BUILD_SHA` from the source
-  commit; an invalid or absent identity fails the image build instead of
-  exposing `build: "unknown"` from `/health`.
-- Regressions cover all three public client-route status responses and the
-  exact compile-time build identity returned by `/health`.
+Candidate `5988cdb59c71d70c0c7c9b1d37ce90fc2ef890c5` **PASSed** independent verification on 2026-08-28. The verified deployment is `https://service-notification-router.sociobot.in`.
 
-## Run and verify
+The prior production-only failures are closed: live `/health` returns the exact full candidate SHA, and `/privacy`, `/terms`, and `/ack/<token>` now return HTTP 200.
+
+## What was verified
+
+- Fresh dependency install; `npm test`, `npm run check`, `npm run build`, locked Rust all-target tests, and optimized Rust release build all passed.
+- Complete local signed-webhook routing flow, consent enforcement, webhook delivery, acknowledgment, invalid/recovery paths, free limits, concurrency, restart persistence, encrypted customer payload storage, and key mode.
+- Live frontend asset hashes exactly match the local candidate build; live backend health identifies the candidate SHA.
+- Desktop and 390px mobile Chromium checks, keyboard skip-link/focus, reduced motion, axe (0 serious/critical; 0 total WCAG 2/2.1 A/AA violations), browser errors, response policies, privacy/outbound requests, caching, bundle sizes, and PWA offline reload.
+
+Full exact commands, responses, hashes, limits, and caveats are in `.factory/verification-2.md`.
+
+## Re-run
 
 ```sh
 npm ci --prefix frontend
 npm test
 npm run check
 npm run build
-BUILD_SHA=$(git rev-parse HEAD) cargo build --release --locked
 BUILD_SHA=$(git rev-parse HEAD) cargo test --all-targets --locked
-
-docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t service-notification-router .
-docker run --rm -p 8080:8080 -v router-data:/data service-notification-router
-curl http://localhost:8080/health
+BUILD_SHA=$(git rev-parse HEAD) cargo build --release --locked
 ```
 
-The health response must contain the same full SHA supplied to the build.
-The fixed container deployment helper supplies that value from `git rev-parse
-HEAD`; Docker builds invoked directly must pass it explicitly as above.
+For the container path, run `docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t service-notification-router .` and then check `/health`; Docker is not present in this verification container.
 
-## Verification performed 2026-08-27
+## Known gaps
 
-- Fresh `npm ci --prefix frontend`: passed with 0 audit vulnerabilities.
-- `npm test`: passed (2 Vitest tests and 6 Rust unit/integration tests).
-- `npm run check`, `npm run build`, and locked optimized Rust build: passed.
-- `BUILD_SHA=868eda19eb2a78da7d728cc77b515a189b1b1eda cargo test --all-targets --locked`:
-  passed; the identity regression asserts the exact compile-time value.
-- Release-server route test: `/privacy`, `/terms`, and a newly generated real
-  `/ack/<token>` each returned HTTP `200`.
-- Chromium desktop and 390×844 mobile test of all three routes: no console or
-  page errors; one `h1`, `main`, title, and `lang=en`; no mobile overflow; axe
-  reported 0 serious or critical violations (CSP bypass was used only to inject
-  the local axe audit script).
-- Persistence smoke: after setup, recipient/rule creation, and a routed test
-  booking, a server restart preserved `initialized: true` and accepted login.
-- Release binary health check with the SHA above returned that exact full value.
-
-## Deployment and operations
-
-The fixed deployment uses `/opt/fleet/lib/deploy-container.sh` and the
-multi-stage non-root Alpine image. It retains no Git metadata in the runtime
-image. Mount persistent `/data`, back up both `router.db` and `router.key`,
-set `PUBLIC_BASE_URL` to the public HTTPS origin, and configure SMTP only when
-email delivery is needed.
-
-No known product or QA gaps remain from the verifier report.
+No product defects found. The only verification-environment limitation was the absence of Docker/Podman/Buildah and a Lighthouse CLI/Playwright Chromium CDP compatibility issue; deployment identity, browser audits, bundle measurements, and same-asset committed Lighthouse evidence compensate for those unavailable local tools.
