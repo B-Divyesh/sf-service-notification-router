@@ -104,6 +104,7 @@ that compiled identity. Every non-health request has a bounded allowance keyed
 by the first valid `X-Forwarded-For` address and returns `Retry-After` with 429.
 
 Production must keep `/data` on durable storage with one replica. Back up
-`router.db`, `router.key`, and `router.setup-code` together. The project uses the
+`router.sqlite3` (or a non-empty legacy `router.db`), `router.key`, and
+`router.setup-code` together. The project uses the
 MIT License. See [`LICENSE`](LICENSE), [privacy](https://service-notification-router.sociobot.in/privacy),
 and [terms](https://service-notification-router.sociobot.in/terms).

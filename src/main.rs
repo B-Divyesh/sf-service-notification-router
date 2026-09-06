@@ -81,7 +81,16 @@ async fn main() -> anyhow::Result<()> {
         }
     }));
     std::fs::create_dir_all(&data_dir)?;
-    let db_path = data_dir.join("router.db");
+    let legacy_db_path = data_dir.join("router.db");
+    let current_db_path = data_dir.join("router.sqlite3");
+    let db_path = if current_db_path.exists()
+        || !legacy_db_path.exists()
+        || legacy_db_path.metadata()?.len() == 0
+    {
+        current_db_path
+    } else {
+        legacy_db_path
+    };
     let database_existed = db_path.exists();
     let database_url = format!("sqlite://{}", db_path.display());
     let options = SqliteConnectOptions::from_str(&database_url)?

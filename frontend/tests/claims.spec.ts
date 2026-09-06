@@ -22,6 +22,12 @@ function claimDataDir(): string {
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0]!;
 }
 
+function claimDatabase(): string {
+  const dir = claimDataDir();
+  const files = readdirSync(dir);
+  return join(dir, files.includes("router.sqlite3") ? "router.sqlite3" : "router.db");
+}
+
 async function postSigned(api: APIRequestContext, secret: string, booking: Record<string, unknown>) {
   const body = JSON.stringify(booking);
   return api.post("/api/bookings", { data: body, headers: { "content-type": "application/json", "x-router-signature": signature(secret, body) } });
@@ -125,7 +131,7 @@ test("@claim:runtime-persistence a PORT-only process protects setup and keeps SQ
     const proof = readFileSync(proofPath, "utf8").trim();
     const setup = await fetch(`${serviceURL}/api/setup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ business_name: "Persistent Clinic", password: "correct horse battery", retention_hours: 24, setup_proof: proof }) }); expect(setup.status).toBe(201);
     child.kill("SIGTERM"); await new Promise(resolveExit => child.once("exit", resolveExit));
-    const database = join(work, "data/router.db");
+    const database = join(work, "data/router.sqlite3");
     const locker = spawn("python3", ["-u", "-c", "import sqlite3,sys,time; db=sqlite3.connect(sys.argv[1]); db.execute('BEGIN EXCLUSIVE'); print('locked', flush=True); time.sleep(3); db.commit()", database], { stdio: ["ignore", "pipe", "pipe"] });
     const lockerDone = new Promise(resolveExit => locker.once("exit", resolveExit));
     await new Promise<void>((resolveLock, rejectLock) => { locker.stdout?.once("data", () => resolveLock()); locker.once("error", rejectLock); });
@@ -208,10 +214,11 @@ test.describe.serial("real router claim outcomes", () => {
     await postSigned(api, secret, { external_id: "private-1", service: "Dental cleaning", customer_name: "Unique Private Patient", customer_email: "private-person@example.invalid" });
     await new Promise(resolve => setTimeout(resolve, 100));
     const dir = claimDataDir();
-    const bytes = ["router.db", "router.db-wal"].map(name => { try { return readFileSync(`${dir}/${name}`).toString("latin1"); } catch { return ""; } }).join("");
+    const database = claimDatabase();
+    const bytes = [database, `${database}-wal`].map(name => { try { return readFileSync(name).toString("latin1"); } catch { return ""; } }).join("");
     expect(bytes).not.toContain("Unique Private Patient"); expect(bytes).not.toContain("private-person@example.invalid");
     expect(statSync(`${dir}/router.key`).mode & 0o777).toBe(0o600);
-    const update = spawnSync("python3", ["-c", "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute(\"update bookings set received_at='2020-01-01T00:00:00Z' where external_id='private-1'\"); db.commit()", `${dir}/router.db`]);
+    const update = spawnSync("python3", ["-c", "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute(\"update bookings set received_at='2020-01-01T00:00:00Z' where external_id='private-1'\"); db.commit()", claimDatabase()]);
     expect(update.status).toBe(0);
     const purge = await api.post("/api/purge", { headers: { authorization: auth } }); expect((await purge.json()).purged).toBeGreaterThanOrEqual(1);
     const events = await (await api.get("/api/events", { headers: { authorization: auth } })).json();
@@ -243,7 +250,7 @@ test.describe.serial("real router claim outcomes", () => {
     const query = new URL(billingRequests[0]!.url!, "http://127.0.0.1:4191"); expect(billingRequests[0]!.method).toBe("GET"); expect([...query.searchParams.keys()]).toEqual(["license"]);
     expect((await (await api.get("/api/config", { headers })).json()).licensed).toBe(true);
     valid = false; const dir = claimDataDir();
-    const update = spawnSync("python3", ["-c", "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute(\"update settings set license_checked_at='2020-01-01T00:00:00Z'\"); db.commit()", `${dir}/router.db`]); expect(update.status).toBe(0);
+    const update = spawnSync("python3", ["-c", "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute(\"update settings set license_checked_at='2020-01-01T00:00:00Z'\"); db.commit()", claimDatabase()]); expect(update.status).toBe(0);
     expect((await (await api.get("/api/config", { headers })).json()).licensed).toBe(false);
     await new Promise<void>(resolve => billing.close(() => resolve()));
   });
