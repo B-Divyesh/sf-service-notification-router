@@ -285,6 +285,10 @@ async fn rate_limit(State(state): State<AppState>, request: Request, next: Next)
         return next.run(request).await;
     }
     let (class, limit) = match (request.method(), path) {
+        // Public documents and versioned frontend assets can be requested several
+        // times during normal navigation. Keep them bounded without letting them
+        // consume the API read allowance used by the router itself.
+        (_, path) if !path.starts_with("/api/") => ("public", 600),
         (_, "/api/login" | "/api/setup") => ("auth", 10),
         (_, "/api/bookings") => ("intake", 120),
         (&Method::GET, _) => ("read", 120),

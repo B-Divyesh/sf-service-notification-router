@@ -263,7 +263,7 @@ test.describe.serial("real router claim outcomes", () => {
   });
 });
 
-test("site routes have titles, focus, touch targets, and a designed 404", async ({ page }) => {
+test("site routes have titles, focus, full-size mobile controls, and a designed 404", async ({ page }) => {
   for (const [path, title] of [["/privacy", "Privacy — Service Notification Router"], ["/terms", "Terms — Service Notification Router"], ["/demo", "Demo — Service Notification Router"]]) {
     await page.goto(path); await expect(page).toHaveTitle(title);
   }
@@ -273,8 +273,19 @@ test("site routes have titles, focus, touch targets, and a designed 404", async 
   await page.goto("/"); await expect(page.getByRole("heading", { name: "Route each booking to its coordinator" })).toBeVisible(); await page.keyboard.press("Tab"); await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
   await page.keyboard.press("Enter"); await expect(page.locator("#main")).toBeFocused();
   const response = await page.goto("/definitely-missing"); expect(response?.status()).toBe(404); await expect(page.getByRole("heading", { name: "This route does not exist" })).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 }); await page.goto("/privacy");
-  for (const link of await page.locator("footer a").all()) expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const path of ["/", "/demo", "/privacy", "/terms"]) {
+    await page.goto(path);
+    const controls = page.locator("a, button");
+    for (let index = 0; index < await controls.count(); index += 1) {
+      const control = controls.nth(index);
+      if (!await control.isVisible()) continue;
+      const box = await control.boundingBox();
+      expect(box, `${path} control ${index} needs a layout box`).not.toBeNull();
+      expect(box!.width, `${path} control ${index} is too narrow`).toBeGreaterThanOrEqual(44);
+      expect(box!.height, `${path} control ${index} is too short`).toBeGreaterThanOrEqual(44);
+    }
+  }
 });
 
 test("accessibility has no serious or critical axe findings", async ({ page }) => {
