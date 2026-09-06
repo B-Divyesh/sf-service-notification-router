@@ -29,11 +29,77 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<Value>> {
     Ok(Json(json!({"initialized":initialized})))
 }
 
+const DEMO_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn demo_sample() -> Value {
+    json!({
+        "metrics": {"received": 3, "delivered": 2, "acknowledged": 1, "unmatched": 1},
+        "events": [
+            {"service":"Dental cleaning","provider":"Dr. Rivera","starts_at":"2026-09-08T09:30:00Z","recipient_name":"Sofia Mendes","channel":"email","status":"delivered","attempt_count":1},
+            {"service":"Prenatal consultation","provider":"Dr. Shah","starts_at":"2026-09-08T11:00:00Z","recipient_name":"Amina Yusuf","channel":"webhook","status":"acknowledged","attempt_count":1},
+            {"service":"New patient assessment","provider":"Dr. Rivera","starts_at":"2026-09-09T14:15:00Z","recipient_name":null,"channel":null,"status":"unmatched","attempt_count":0}
+        ],
+        "recipients": [
+            {"name":"Sofia Mendes","channel":"email","destination":"frontdesk@example.invalid"},
+            {"name":"Amina Yusuf","channel":"webhook","destination":"https://notices.example.invalid/bookings"}
+        ],
+        "rules": [
+            {"match_field":"service","match_value":"Dental cleaning","recipient_name":"Sofia Mendes","priority":10},
+            {"match_field":"provider","match_value":"Dr. Shah","recipient_name":"Amina Yusuf","priority":20}
+        ]
+    })
+}
+
+pub async fn start_demo(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
+    let id = Uuid::new_v4().to_string();
+    let mut workspaces = state.demo_workspaces.lock().expect("demo workspace lock");
+    workspaces.retain(|_, created| created.elapsed() < DEMO_TTL);
+    workspaces.insert(id.clone(), std::time::Instant::now());
+    (
+        StatusCode::CREATED,
+        Json(json!({"workspace_id":id,"expires_in_seconds":86400,"sample":demo_sample()})),
+    )
+}
+
+pub async fn get_demo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let mut workspaces = state.demo_workspaces.lock().expect("demo workspace lock");
+    workspaces.retain(|_, created| created.elapsed() < DEMO_TTL);
+    if !workspaces.contains_key(&id) {
+        return Err(AppError::NotFound(
+            "This sample workspace expired. Reset the demo to start again.".into(),
+        ));
+    }
+    Ok(Json(
+        json!({"workspace_id":id,"expires_in_seconds":86400,"sample":demo_sample()}),
+    ))
+}
+
+pub async fn reset_demo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let mut workspaces = state.demo_workspaces.lock().expect("demo workspace lock");
+    workspaces.retain(|_, created| created.elapsed() < DEMO_TTL);
+    let Some(created) = workspaces.get_mut(&id) else {
+        return Err(AppError::NotFound(
+            "This sample workspace expired. Start the demo again.".into(),
+        ));
+    };
+    *created = std::time::Instant::now();
+    Ok(Json(
+        json!({"workspace_id":id,"expires_in_seconds":86400,"sample":demo_sample()}),
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct SetupInput {
     business_name: String,
     password: String,
     retention_hours: Option<i64>,
+    setup_proof: String,
 }
 
 pub async fn setup(
@@ -48,6 +114,9 @@ pub async fn setup(
         return Err(AppError::Conflict(
             "This router has already been set up.".into(),
         ));
+    }
+    if !crypto::proof_matches(&state.bootstrap_proof, &input.setup_proof) {
+        return Err(AppError::Forbidden);
     }
     validate_name(&input.business_name, "Business name")?;
     if input.password.chars().count() < 12 {
@@ -128,6 +197,7 @@ async fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<()> {
 
 pub async fn config(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>> {
     require_auth(&state, &headers).await?;
+    refresh_license_if_due(&state).await?;
     let row = sqlx::query(
         "SELECT business_name, retention_hours, licensed, webhook_secret FROM settings WHERE id=1",
     )
@@ -350,6 +420,7 @@ pub async fn delete_rule(
 }
 
 async fn enforce_free_limit(state: &AppState, table: &str) -> Result<()> {
+    refresh_license_if_due(state).await?;
     let licensed = sqlx::query_scalar::<_, i64>("SELECT licensed FROM settings WHERE id=1")
         .fetch_one(&state.pool)
         .await?
@@ -450,6 +521,7 @@ async fn ingest_booking(
         .bind(&id).bind(&booking.external_id).bind(booking.service.trim()).bind(booking.provider.as_deref()).bind(booking.starts_at.as_deref()).bind(encrypted).bind(Utc::now().to_rfc3339()).execute(&state.pool).await?;
     if let Some(rule) = matched {
         let ack = crypto::random_token();
+        let acknowledgment_url = format!("{}/ack/{}", state.config.public_base_url, ack);
         let result = sqlx::query("INSERT INTO notifications(booking_id,recipient_id,rule_id,ack_token,status,created_at) VALUES(?,?,?,?, 'queued', ?)")
             .bind(&id).bind(rule.get::<i64,_>("recipient_id")).bind(rule.get::<i64,_>("id")).bind(&ack).bind(Utc::now().to_rfc3339()).execute(&state.pool).await?;
         let notification_id = result.last_insert_rowid();
@@ -460,7 +532,9 @@ async fn ingest_booking(
             .await?;
         Ok((
             StatusCode::ACCEPTED,
-            Json(json!({"accepted":true,"booking_id":id,"matched":true,"delivery_status":status})),
+            Json(
+                json!({"accepted":true,"booking_id":id,"matched":true,"delivery_status":status,"acknowledgment_url":acknowledgment_url}),
+            ),
         ))
     } else {
         Ok((
@@ -652,6 +726,66 @@ pub async fn activate_license(
     Ok(Json(
         json!({"valid":valid,"reason":verdict.get("reason").cloned().unwrap_or(json!("invalid"))}),
     ))
+}
+
+pub async fn refresh_license_if_due(state: &AppState) -> Result<()> {
+    let row = sqlx::query(
+        "SELECT licensed,license_token_enc,license_checked_at FROM settings WHERE id=1",
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    if row.get::<i64, _>("licensed") != 1 {
+        return Ok(());
+    }
+    if let Some(checked) = row.get::<Option<String>, _>("license_checked_at") {
+        if chrono::DateTime::parse_from_rfc3339(&checked)
+            .map(|value| {
+                Utc::now().signed_duration_since(value.with_timezone(&Utc)) < Duration::hours(24)
+            })
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+    }
+    let Some(encrypted) = row.get::<Option<String>, _>("license_token_enc") else {
+        sqlx::query("UPDATE settings SET licensed=0 WHERE id=1")
+            .execute(&state.pool)
+            .await?;
+        return Ok(());
+    };
+    let token = String::from_utf8(crypto::decrypt(&state.encryption_key, &encrypted)?)
+        .map_err(|_| AppError::Internal("The saved license could not be read.".into()))?;
+    let url = format!(
+        "{}/products/service-notification-router/verify",
+        state.config.billing_api_base
+    );
+    let response = match state
+        .http
+        .get(url)
+        .query(&[("license", &token)])
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => response,
+        _ => return Ok(()),
+    };
+    let verdict: Value = match response.json().await {
+        Ok(value) => value,
+        Err(_) => return Ok(()),
+    };
+    let valid = verdict
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    sqlx::query("UPDATE settings SET licensed=?,license_checked_at=? WHERE id=1")
+        .bind(if valid { 1 } else { 0 })
+        .bind(Utc::now().to_rfc3339())
+        .execute(&state.pool)
+        .await?;
+    Ok(())
 }
 
 fn validate_name(value: &str, label: &str) -> Result<()> {

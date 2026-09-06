@@ -6,7 +6,7 @@ mod routes;
 use axum::{
     body::Body,
     extract::{ConnectInfo, Request, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderName, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -19,7 +19,7 @@ use sqlx::{
 use std::{
     collections::HashMap,
     env,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, Mutex},
@@ -42,6 +42,8 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub http: reqwest::Client,
     pub rate_limits: Arc<Mutex<HashMap<String, RateBucket>>>,
+    pub bootstrap_proof: Arc<String>,
+    pub demo_workspaces: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 pub struct RateBucket {
@@ -70,7 +72,14 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().json())
         .init();
 
-    let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "./data".into()));
+    let data_dir_supplied = env::var("DATA_DIR").ok();
+    let data_dir = PathBuf::from(data_dir_supplied.clone().unwrap_or_else(|| {
+        if Path::new("/data").is_dir() {
+            "/data".into()
+        } else {
+            "./data".into()
+        }
+    }));
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("router.db");
     let database_url = format!("sqlite://{}", db_path.display());
@@ -82,10 +91,19 @@ async fn main() -> anyhow::Result<()> {
         .connect_with(options)
         .await?;
     sqlx::migrate!().run(&pool).await?;
-    let encryption_key = crypto::load_or_create_key(&data_dir.join("router.key"))?;
+    let key_path = data_dir.join("router.key");
+    let encryption_key_source = if key_path.exists() {
+        "persisted"
+    } else {
+        "generated"
+    };
+    let encryption_key = crypto::load_or_create_key(&key_path)?;
+    let (bootstrap_proof, bootstrap_proof_source) = load_or_create_bootstrap_proof(&data_dir)?;
+    let public_base_url_supplied = env::var("PUBLIC_BASE_URL").ok();
     let config = AppConfig {
-        public_base_url: env::var("PUBLIC_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into())
+        public_base_url: public_base_url_supplied
+            .clone()
+            .unwrap_or_else(|| "https://service-notification-router.sociobot.in".into())
             .trim_end_matches('/')
             .into(),
         billing_api_base: env::var("BILLING_API_BASE")
@@ -110,7 +128,29 @@ async fn main() -> anyhow::Result<()> {
             .user_agent("service-notification-router/1.0")
             .build()?,
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
+        bootstrap_proof: Arc::new(bootstrap_proof),
+        demo_workspaces: Arc::new(Mutex::new(HashMap::new())),
     };
+    tracing::info!(
+        data_dir_source = if data_dir_supplied.is_some() {
+            "supplied"
+        } else {
+            "default"
+        },
+        encryption_key_source,
+        bootstrap_proof_source,
+        public_base_url_source = if public_base_url_supplied.is_some() {
+            "supplied"
+        } else {
+            "product_default"
+        },
+        smtp_source = if state.config.smtp_host.is_some() {
+            "supplied"
+        } else {
+            "not_configured"
+        },
+        "configuration ready"
+    );
     spawn_maintenance(state.clone());
 
     let app = build_app(state, Path::new("frontend/dist"));
@@ -135,12 +175,23 @@ pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
     // not-found handler. That handler preserves a 404 status when it returns
     // an index file, making valid legal and acknowledgment URLs look failed.
     let client_routes = Router::new()
+        .route_service("/demo", ServeFile::new(index.clone()))
+        .route_service("/setup", ServeFile::new(index.clone()))
+        .route_service("/login", ServeFile::new(index.clone()))
+        .route_service("/dashboard", ServeFile::new(index.clone()))
+        .route_service("/recipients", ServeFile::new(index.clone()))
+        .route_service("/rules", ServeFile::new(index.clone()))
+        .route_service("/test", ServeFile::new(index.clone()))
+        .route_service("/settings", ServeFile::new(index.clone()))
         .route_service("/privacy", ServeFile::new(index.clone()))
         .route_service("/terms", ServeFile::new(index.clone()))
         .route_service("/ack/{token}", ServeFile::new(index.clone()));
     let api = Router::new()
         .route("/health", get(routes::health))
         .route("/api/status", get(routes::status))
+        .route("/api/demo", post(routes::start_demo))
+        .route("/api/demo/{id}", get(routes::get_demo))
+        .route("/api/demo/{id}/reset", post(routes::reset_demo))
         .route("/api/setup", post(routes::setup))
         .route("/api/login", post(routes::login))
         .route(
@@ -178,7 +229,10 @@ pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
     Router::new()
         .merge(api)
         .merge(client_routes)
-        .fallback_service(ServeDir::new(frontend_dir).not_found_service(ServeFile::new(index)))
+        .fallback_service(
+            ServeDir::new(frontend_dir)
+                .not_found_service(ServeFile::new(frontend_dir.join("404.html"))),
+        )
         .with_state(state.clone())
         .layer(axum::middleware::from_fn(cache_headers))
         .layer(axum::middleware::from_fn_with_state(
@@ -191,25 +245,29 @@ pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("permissions-policy"), HeaderValue::from_static("camera=(), microphone=(), geolocation=()")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in https://pilot-api.sociobot.in; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://api.sociobot.in")))
         .layer(TraceLayer::new_for_http())
 }
 
 async fn rate_limit(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
-    let limit = match path {
-        "/api/login" | "/api/setup" => 20,
-        "/api/bookings" => 120,
-        _ => return next.run(request).await,
+    if path == "/health" {
+        return next.run(request).await;
+    }
+    let (class, limit) = match (request.method(), path) {
+        (_, "/api/login" | "/api/setup") => ("auth", 10),
+        (_, "/api/bookings") => ("intake", 120),
+        (&Method::GET, _) => ("read", 120),
+        _ => ("write", 40),
     };
-    let peer = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|value| value.0.ip().to_string())
-        .unwrap_or_else(|| "local-test".into());
-    let key = format!("{peer}:{path}");
+    let peer = forwarded_client_ip(&request).unwrap_or_else(|| "local-test".into());
+    let key = format!("{peer}:{class}");
     let blocked = {
         let mut buckets = state.rate_limits.lock().expect("rate limit lock");
+        if buckets.len() > 10_000 {
+            buckets.retain(|_, bucket| bucket.window_started.elapsed() < Duration::from_secs(60));
+        }
         let bucket = buckets.entry(key).or_insert(RateBucket {
             window_started: Instant::now(),
             count: 0,
@@ -230,6 +288,49 @@ async fn rate_limit(State(state): State<AppState>, request: Request, next: Next)
             .into_response();
     }
     next.run(request).await
+}
+
+fn forwarded_client_ip(request: &Request) -> Option<String> {
+    request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            request
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|value| value.0.ip().to_string())
+        })
+}
+
+fn load_or_create_bootstrap_proof(data_dir: &Path) -> anyhow::Result<(String, &'static str)> {
+    let path = data_dir.join("router.setup-code");
+    let (proof, source) = if let Ok(value) = env::var("SETUP_PROOF") {
+        (value, "supplied")
+    } else if path.exists() {
+        (
+            std::fs::read_to_string(&path)?.trim().to_owned(),
+            "persisted",
+        )
+    } else {
+        (crypto::random_token(), "generated")
+    };
+    if proof.len() < 20 {
+        anyhow::bail!("setup proof must contain at least 20 characters");
+    }
+    if source == "supplied" || !path.exists() {
+        std::fs::write(&path, proof.as_bytes())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok((proof, source))
 }
 
 async fn cache_headers(request: Request<Body>, next: Next) -> Response {
@@ -257,6 +358,9 @@ fn spawn_maintenance(state: AppState) {
             tick.tick().await;
             if let Err(error) = routes::purge_expired(&state).await {
                 tracing::warn!(%error, "retention purge failed");
+            }
+            if let Err(error) = routes::refresh_license_if_due(&state).await {
+                tracing::warn!(%error, "license refresh deferred");
             }
             let ids = sqlx::query_scalar::<_, i64>("SELECT id FROM notifications WHERE status IN ('queued','failed') AND attempt_count < 8 AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime('now')) ORDER BY id LIMIT 20")
                 .fetch_all(&state.pool).await.unwrap_or_default();
@@ -327,6 +431,8 @@ mod integration_tests {
             }),
             http: reqwest::Client::new(),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            bootstrap_proof: Arc::new("test-bootstrap-proof-123456789".into()),
+            demo_workspaces: Arc::new(Mutex::new(HashMap::new())),
         };
         (build_app(state.clone(), dir.path()), state, dir)
     }
@@ -344,7 +450,19 @@ mod integration_tests {
         )
         .unwrap();
 
-        for path in ["/privacy", "/terms", "/ack/a-valid-client-token"] {
+        for path in [
+            "/demo",
+            "/setup",
+            "/login",
+            "/dashboard",
+            "/recipients",
+            "/rules",
+            "/test",
+            "/settings",
+            "/privacy",
+            "/terms",
+            "/ack/a-valid-client-token",
+        ] {
             let response = app
                 .clone()
                 .oneshot(Request::get(path).body(Body::empty()).unwrap())
@@ -380,7 +498,7 @@ mod integration_tests {
     #[tokio::test]
     async fn setup_route_and_signed_booking_flow() {
         let (app, state, _dir) = test_app().await;
-        let setup = app.clone().oneshot(Request::post("/api/setup").header("content-type","application/json").body(Body::from(json!({"business_name":"Harbor Clinic","password":"correct horse battery","retention_hours":24}).to_string())).unwrap()).await.unwrap();
+        let setup = app.clone().oneshot(Request::post("/api/setup").header("content-type","application/json").body(Body::from(json!({"business_name":"Harbor Clinic","password":"correct horse battery","retention_hours":24,"setup_proof":"test-bootstrap-proof-123456789"}).to_string())).unwrap()).await.unwrap();
         assert_eq!(setup.status(), StatusCode::CREATED);
         let setup_json = json_body(setup).await;
         let token = setup_json["token"].as_str().unwrap();
@@ -429,5 +547,100 @@ mod integration_tests {
             .await
             .unwrap();
         assert_eq!(stored, "acknowledged");
+    }
+
+    #[tokio::test]
+    async fn setup_requires_the_private_bootstrap_proof() {
+        let (app, _state, _dir) = test_app().await;
+        let response = app
+            .oneshot(
+                Request::post("/api/setup")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "business_name":"Harbor Clinic",
+                            "password":"correct horse battery",
+                            "retention_hours":24,
+                            "setup_proof":"public-visitor-does-not-have-this"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn demo_is_isolated_from_the_sqlite_workspace() {
+        let (app, state, _dir) = test_app().await;
+        let before = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM bookings")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        let started = app
+            .clone()
+            .oneshot(
+                Request::post("/api/demo")
+                    .header("x-forwarded-for", "203.0.113.40")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(started.status(), StatusCode::CREATED);
+        let body = json_body(started).await;
+        assert_eq!(body["sample"]["events"].as_array().unwrap().len(), 3);
+        assert_eq!(body["sample"]["metrics"]["received"], 3);
+        let after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM bookings")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "demo requests must not read or write real booking rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn forwarded_clients_receive_independent_allowances_and_retry_after() {
+        let (app, _state, _dir) = test_app().await;
+        for _ in 0..120 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::get("/api/status")
+                        .header("x-forwarded-for", "203.0.113.10, 10.0.0.4")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        let blocked = app
+            .clone()
+            .oneshot(
+                Request::get("/api/status")
+                    .header("x-forwarded-for", "203.0.113.10, 10.0.0.4")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(blocked.headers().get(header::RETRY_AFTER).unwrap(), "60");
+
+        let other_client = app
+            .oneshot(
+                Request::get("/api/status")
+                    .header("x-forwarded-for", "203.0.113.11, 10.0.0.4")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(other_client.status(), StatusCode::OK);
     }
 }

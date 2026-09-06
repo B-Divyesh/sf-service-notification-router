@@ -94,3 +94,16 @@ width.
 
 Icons in the application are authored inline as simple geometric SVG paths and
 are treated as interface symbols, not illustrative assets.
+
+### Derived discovery assets
+
+- `frontend/public/social-card.jpg` is a 1200×630 center crop of the original
+  `hero-routing-room` artwork. It introduces no new source material.
+- `frontend/public/apple-touch-icon.png` is a 180×180 crop from the same original
+  artwork. Both derivatives were produced locally with ImageMagick on
+  2026-09-06.
+
+The demo uses the same paper tickets, ink stamps, and routing lines as the real
+delivery board. Its sunflower banner stays visible so sample and real state
+cannot be confused. Reset changes the board without a transition; this keeps
+the action clear and respects the no-loop motion policy.

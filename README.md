@@ -1,104 +1,109 @@
 # Service Notification Router
 
-Service Notification Router is a narrow, self-hosted handoff tool for a clinic,
-studio, or multi-service office. It receives an already-created booking as a
-signed normalized webhook, matches its service or provider to one responsible
-recipient, delivers by email or webhook, and records a minimal acknowledgment.
-Encrypted payloads are purged after the configured interval.
+Service Notification Router sends an existing booking notice to one responsible
+coordinator. It is for micro-clinics, studios, and multi-service offices that do
+not want every coordinator to receive every booking.
 
-It deliberately does not create bookings, scrape WhatsApp, send marketing
-messages, or manage a workforce. The live product is intended for
-<https://service-notification-router.sociobot.in>.
+The free router supports three recipients and three rules. The planned paid
+offer is $39 USD once for unlimited recipients and rules. Checkout registration
+is currently pending; the free core remains available.
 
-## Product behavior
+Try the isolated sample at
+<https://service-notification-router.sociobot.in/demo>. The sample uses an
+expiring in-memory workspace and never opens or changes the real SQLite data.
 
-- HMAC-SHA256 verification on the public booking intake
-- Priority-ordered exact service/provider routing
-- Email through the operator's SMTP relay or JSON to an operator-controlled webhook
-- Automatic delivery retries with an admin retry action
-- Per-notice acknowledgment links
-- AES-256-GCM encrypted booking payloads with a separate on-disk key
-- First-run admin setup, Argon2 password hashing, seven-day local sessions
-- Three recipients and three rules free; $39 one-time Sociobot license for unlimited routing
-- Offline shell, mobile layout, keyboard focus, reduced-motion treatment, privacy and terms pages
+## What it does
+
+- Accepts normalized booking JSON after HMAC-SHA256 verification.
+- Matches exact service or provider values in priority order.
+- Sends signed JSON to a configured webhook.
+- Keeps email unavailable until the operator supplies an SMTP relay.
+- Adds a public HTTPS acknowledgment link to each matched notice.
+- Records delivery attempts and lets an administrator retry failures.
+- Encrypts private booking fields and lets an administrator purge expired payloads.
+
+These public behaviors are mapped to outcome tests in
+[`.factory/claims.json`](.factory/claims.json). The product does not create
+booking pages, scrape WhatsApp, send marketing messages, or manage staff.
 
 ## Run locally
 
-Requirements: Node 22+, npm 10+, Rust 1.98+.
+Install Node 22+, npm 10+, and the current stable Rust toolchain. From a clean
+checkout:
 
 ```sh
-npm install --prefix frontend
+npm ci --prefix frontend
 npm run build
 DATA_DIR=./data PUBLIC_BASE_URL=http://localhost:8080 cargo run
 ```
 
-Open <http://localhost:8080> and complete first-run setup. The Rust server serves
-`frontend/dist` and the API on the same origin.
+Open <http://localhost:8080>. On first boot, the server creates
+`data/router.setup-code` with mode `0600`. Enter that private value on `/setup`.
+`SETUP_PROOF` may supply it for automated local environments.
 
-For frontend-only iteration, run `npm run dev`; Vite uses its normal development
-port, so API calls require the Rust service or a local proxy.
+The container starts with only `PORT` supplied. It uses `/data` when that mount
+exists and otherwise uses `./data`. Its default public acknowledgment origin is
+`https://service-notification-router.sociobot.in`; local and alternate hosts
+should set `PUBLIC_BASE_URL`.
 
 ## Configure delivery
-
-All server configuration uses environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP port |
-| `DATA_DIR` | `./data` | SQLite database and separate encryption key |
-| `PUBLIC_BASE_URL` | `http://localhost:8080` | Absolute base for acknowledgment links |
-| `SMTP_HOST` | unset | SMTP relay; required for email recipients |
+| `DATA_DIR` | `/data` when present, otherwise `./data` | SQLite, encryption key, setup code |
+| `PUBLIC_BASE_URL` | Product HTTPS origin | Public acknowledgment links |
+| `SETUP_PROOF` | Generated on first boot | Optional private first-run override |
+| `SMTP_HOST` | unset | SMTP relay for email recipients |
 | `SMTP_PORT` | `587` | STARTTLS SMTP port |
 | `SMTP_USERNAME` | unset | Optional SMTP login |
 | `SMTP_PASSWORD` | unset | Optional SMTP password |
-| `SMTP_FROM` | unset | Required sender mailbox, e.g. `Bookings <bookings@example.com>` |
-| `BILLING_API_BASE` | Sociobot production API | Override with pilot API on staging |
+| `SMTP_FROM` | unset | Sender mailbox |
+| `BILLING_API_BASE` | Sociobot production API | License verification endpoint |
 | `RUST_LOG` | service defaults | Structured log filter |
 
-After setup, Settings shows the intake secret once. Sign the exact JSON request
-bytes with HMAC-SHA256 and send the lowercase or uppercase hex digest as
-`X-Router-Signature: sha256=<digest>` to `POST /api/bookings`.
+After setup, Settings shows the intake secret once. Sign the exact JSON bytes
+and send the digest in `X-Router-Signature`.
 
 ```json
 {
   "external_id": "apt_1048",
   "service": "Dental cleaning",
   "provider": "Dr. Rivera",
-  "starts_at": "2026-08-28T09:30:00Z",
+  "starts_at": "2026-09-08T09:30:00Z",
   "customer_name": "A. Patient",
   "customer_email": "patient@example.com",
   "metadata": { "source": "scheduler" }
 }
 ```
 
-Recipient webhooks receive `booking.routed`, the normalized booking, recipient
-name, and acknowledgment URL. The outgoing body is signed with the same router
-secret in `X-Router-Signature`. Only add email or messaging gateway recipients
-who consent to operational notices.
+Only add recipients who consented to operational notices. Configure an SMTP
+relay before using email. No provider credential ships with this repository.
 
 ## Test and build
 
 ```sh
-npm test       # Vitest plus Rust unit/integration tests
-npm run check  # TypeScript plus cargo check
-npm run build  # reproducible Vite output in frontend/dist
+npm test
+npm run check
+npm run build
 ```
 
-The Rust integration test covers setup, recipient/rule creation, signature
-verification, encrypted ingest, route matching, failed-provider handling, and
-acknowledgment. Build and run the production container with:
+`npm test` runs Vitest, Rust tests, and browser claim checks. Each command in
+`.factory/claims.json` can also run one public claim from the same clean setup.
+The browser suite uses Playwright 1.58.2 and its preinstalled Chromium.
+
+Build and run the production container:
 
 ```sh
-docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t service-notification-router .
-docker run --rm -p 8080:8080 -v router-data:/data \
-  -e PUBLIC_BASE_URL=http://localhost:8080 service-notification-router
+docker build -t service-notification-router .
+docker run --rm -p 8080:8080 -v router-data:/data service-notification-router
 ```
 
-`GET /health` reports the full immutable commit SHA compiled into the image.
-The Dockerfile rejects an absent or invalid build identity; the fixed container
-deployment path supplies `BUILD_SHA` from the source commit.
+Factory builds supply `BUILD_SHA`; local builds use `dev`. `GET /health` returns
+that compiled identity. Every non-health request has a bounded allowance keyed
+by the first valid `X-Forwarded-For` address and returns `Retry-After` with 429.
 
-Production deployments must use HTTPS, persistent storage, an SMTP relay when
-email is enabled, and a protected backup of both `router.db` and `router.key`.
-The project is MIT licensed; see [LICENSE](LICENSE). Visual decisions and asset
-provenance are in [.factory/design.md](.factory/design.md).
+Production must keep `/data` on durable storage with one replica. Back up
+`router.db`, `router.key`, and `router.setup-code` together. The project uses the
+MIT License. See [`LICENSE`](LICENSE), [privacy](https://service-notification-router.sociobot.in/privacy),
+and [terms](https://service-notification-router.sociobot.in/terms).

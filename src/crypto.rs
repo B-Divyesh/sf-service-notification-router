@@ -80,6 +80,15 @@ pub fn sign(secret: &str, body: &[u8]) -> String {
     format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
 }
 
+pub fn proof_matches(expected: &str, supplied: &str) -> bool {
+    let mut expected_mac = <Hmac<Sha256> as Mac>::new_from_slice(expected.as_bytes()).unwrap();
+    expected_mac.update(b"service-notification-router setup");
+    let expected_bytes = expected_mac.finalize().into_bytes();
+    let mut supplied_mac = <Hmac<Sha256> as Mac>::new_from_slice(supplied.as_bytes()).unwrap();
+    supplied_mac.update(b"service-notification-router setup");
+    supplied_mac.verify_slice(&expected_bytes).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +107,11 @@ mod tests {
         let signature = sign("secret", b"booking-a");
         assert!(verify_signature("secret", b"booking-a", &signature));
         assert!(!verify_signature("secret", b"booking-b", &signature));
+    }
+
+    #[test]
+    fn setup_proofs_reject_a_different_value() {
+        assert!(proof_matches("private-setup-proof", "private-setup-proof"));
+        assert!(!proof_matches("private-setup-proof", "public-guess"));
     }
 }

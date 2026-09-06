@@ -1,0 +1,1 @@
+Route each booking notice to the coordinator responsible for its service or provider.

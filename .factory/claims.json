@@ -1,0 +1,128 @@
+[
+  {
+    "id": "job-and-audience",
+    "claim": "The first phone screen identifies booking routing, its intended offices, and the sample action.",
+    "where": "landing first screen",
+    "test": "npm run test:claims -- --grep \"@claim:job-and-audience\"",
+    "sandbox": "fresh 390 by 844 browser context"
+  },
+  {
+    "id": "demo-sample",
+    "claim": "One click opens three realistic sample booking outcomes.",
+    "where": "landing action and /demo",
+    "test": "npm run test:claims -- --grep \"@claim:demo-sample\"",
+    "sandbox": "fresh browser context using only /demo sample data"
+  },
+  {
+    "id": "demo-isolation",
+    "claim": "The demo resets through its isolated sample API and does not call real workspace APIs.",
+    "where": "/demo banner",
+    "test": "npm run test:claims -- --grep \"@claim:demo-isolation\"",
+    "sandbox": "fresh browser context with all API requests recorded"
+  },
+  {
+    "id": "setup-protection",
+    "claim": "A visitor without the private setup code cannot claim an empty router.",
+    "where": "/setup and README",
+    "test": "npm run test:claims -- --grep \"@claim:setup-protection\"",
+    "sandbox": "fresh server and empty SQLite database"
+  },
+  {
+    "id": "signed-intake",
+    "claim": "Unsigned or changed booking request bytes are rejected.",
+    "where": "How it works and README",
+    "test": "npm run test:claims -- --grep \"@claim:signed-intake\"",
+    "sandbox": "fresh protected workspace with a generated intake secret"
+  },
+  {
+    "id": "routing-rules",
+    "claim": "Exact service rules use priority and provider rules send one notice to the selected recipient.",
+    "where": "landing preview and README",
+    "test": "npm run test:claims -- --grep \"@claim:routing-rules\"",
+    "sandbox": "fresh workspace with three recipients, three rules, and a local webhook receiver"
+  },
+  {
+    "id": "delivery-ack",
+    "claim": "Each matched notice has a public HTTPS acknowledgment that records completion.",
+    "where": "How it works, demo, and README",
+    "test": "npm run test:claims -- --grep \"@claim:delivery-ack\"",
+    "sandbox": "fresh workspace and signed sample booking"
+  },
+  {
+    "id": "delivery-retry",
+    "claim": "An administrator can retry a failed notice and record another attempt.",
+    "where": "delivery board and README",
+    "test": "npm run test:claims -- --grep \"@claim:delivery-retry\"",
+    "sandbox": "fresh workspace with an intentionally unavailable email relay"
+  },
+  {
+    "id": "encrypted-retention",
+    "claim": "Private booking fields are encrypted at rest and an administrator can purge expired payloads.",
+    "where": "privacy section, privacy page, and README",
+    "test": "npm run test:claims -- --grep \"@claim:encrypted-retention\"",
+    "sandbox": "fresh SQLite workspace; inspect raw database bytes and purge an aged sample"
+  },
+  {
+    "id": "free-allowance",
+    "claim": "Three recipients and three rules are free; the fourth of either requires a license.",
+    "where": "landing price, settings, terms, and README",
+    "test": "npm run test:claims -- --grep \"@claim:free-allowance\"",
+    "sandbox": "fresh unlicensed workspace"
+  },
+  {
+    "id": "free-paid-limits",
+    "claim": "The public offer states $39 USD once and names pending checkout registration.",
+    "where": "landing and settings",
+    "test": "npm run test:claims -- --grep \"@claim:free-paid-limits\"",
+    "sandbox": "fresh landing page"
+  },
+  {
+    "id": "request-limits",
+    "claim": "Forwarded clients receive independent request allowances with 429 and Retry-After.",
+    "where": "README operations",
+    "test": "npm run test:claims -- --grep \"@claim:request-limits\"",
+    "sandbox": "fresh server with two documented client IPs"
+  },
+  {
+    "id": "offline-recovery",
+    "claim": "An offline reload shows a clear retry screen after the shell is cached.",
+    "where": "landing facts and README",
+    "test": "npm run test:claims -- --grep \"@claim:offline-recovery\"",
+    "sandbox": "dedicated browser context switched offline after a warm reload"
+  },
+  {
+    "id": "privacy-network",
+    "claim": "Landing and demo load without trackers, CDN scripts, or third-party fonts.",
+    "where": "landing facts, privacy page, and README",
+    "test": "npm run test:claims -- --grep \"@claim:privacy-network\"",
+    "sandbox": "fresh browser context recording every outgoing request"
+  },
+  {
+    "id": "license-recheck",
+    "claim": "License checks send only the license token, and an invalid daily verdict removes the paid routing allowance.",
+    "where": "privacy, terms, and README",
+    "test": "npm run test:claims -- --grep \"@claim:license-recheck\"",
+    "sandbox": "fresh workspace and recorded local billing fixture"
+  },
+  {
+    "id": "health-build",
+    "claim": "Health reports the compiled build identity.",
+    "where": "README",
+    "test": "npm run test:claims -- --grep \"@claim:health-build\"",
+    "sandbox": "fresh server compiled with a known test build value"
+  },
+  {
+    "id": "scope-boundaries",
+    "claim": "The sample is a notification router, not a booking page, WhatsApp scraper, marketing tool, or staff scheduler.",
+    "where": "landing scope section and README",
+    "test": "npm run test:claims -- --grep \"@claim:scope-boundaries\"",
+    "sandbox": "fresh demo context with all requests recorded"
+  },
+  {
+    "id": "runtime-persistence",
+    "claim": "The service starts with only PORT, creates protected local configuration, and keeps SQLite state across a restart.",
+    "where": "README runtime and deployment sections",
+    "test": "npm run test:claims -- --grep \"@claim:runtime-persistence\"",
+    "sandbox": "fresh temporary working directory and two process starts with only PORT supplied"
+  }
+]

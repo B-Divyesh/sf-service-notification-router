@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
-    "test": "npm --prefix frontend test && cargo test",
+    "test": "npm --prefix frontend test && cargo test && npm run test:claims",
+    "test:claims": "npm --prefix frontend run test:claims --",
     "check": "npm --prefix frontend run check && cargo check"
   }
 }

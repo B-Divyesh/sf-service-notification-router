@@ -11,6 +11,8 @@ pub enum AppError {
     BadRequest(String),
     #[error("authentication required")]
     Unauthorized,
+    #[error("The private setup code is not valid.")]
+    Forbidden,
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
@@ -26,6 +28,7 @@ impl IntoResponse for AppError {
         let status = match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::PaymentRequired => StatusCode::PAYMENT_REQUIRED,

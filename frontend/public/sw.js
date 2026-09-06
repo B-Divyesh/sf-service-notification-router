@@ -1,4 +1,4 @@
-const CACHE = "router-shell-v2";
+const CACHE = "router-shell-v3";
 const SHELL = ["/", "/mark.svg", "/assets/hero-routing-room-mobile.webp"];
 self.addEventListener("install", event => event.waitUntil((async () => {
   const cache = await caches.open(CACHE);
