@@ -121,3 +121,27 @@ Evidence is under `/work/.evidence/live-final/`, with the catalog description at
   passed the live container and restart checks.
 - Do not increase the replica limit above one while SQLite uses the private
   Azure Files mount.
+
+## Verification 3 — 2026-09-06
+
+Independent verification against the live service completed with **FAIL**:
+one P2 accessibility finding remains and there are zero untested public claims.
+See [`.factory/verification-3.md`](verification-3.md) for the full evidence.
+
+- Candidate implementation: `a2b64606a338c80a0dd371586fa8942b427da024`
+- Report/documentation commit reviewed: `2bbb596d4bd2cc8aedf204835d1484ca92ebd861`
+- Live health build: `2bbb596d4bd2cc8aedf204835d1484ca92ebd861`
+- The code diff between those commits is empty; only this handoff changed.
+- Clean-clone `npm run check`, `npm run build`, `npm test`, all 18 individual
+  claim commands, `cargo test --all-targets --locked`, and clippy passed.
+- Demo isolation, reset, exit, real-state preservation, live rate limiting,
+  restart persistence, offline recovery, route titles, keyboard focus, privacy,
+  and designed 404 behavior passed.
+
+### Remaining finding
+
+At 390 × 844, **Read the privacy policy →** on the landing page is 185.86 × 17
+CSS px and the footer **Terms** link is 38.13 × 44 CSS px. Both fail the
+required 44 × 44 minimum touch target. Add visible/pointer padding or use
+block-level link controls, deploy, then repeat this verification. Do not call
+the product PASS until this is closed.
