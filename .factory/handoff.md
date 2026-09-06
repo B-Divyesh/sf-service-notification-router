@@ -1,33 +1,28 @@
-# Handoff — Service Notification Router verification 2
+# Handoff — Service Notification Router review 1
 
-## PASS
+## FAIL
 
-Candidate `5988cdb59c71d70c0c7c9b1d37ce90fc2ef890c5` **PASSed** independent verification on 2026-08-28. The verified deployment is `https://service-notification-router.sociobot.in`.
+Review 1 on 2026-09-06 found **14 findings** and **37 public claims without required claim tests**. The implementation reviewed is `5988cdb59c71d70c0c7c9b1d37ce90fc2ef890c5`; the documentation head is `7104598628309cbd7d1735d6270d3637253d9d90`. The live backend and frontend match the implementation candidate.
 
-The prior production-only failures are closed: live `/health` returns the exact full candidate SHA, and `/privacy`, `/terms`, and `/ack/<token>` now return HTTP 200.
+The full evidence and remediation requirements are in `.factory/review-1.md`.
 
-## What was verified
+## What was done
 
-- Fresh dependency install; `npm test`, `npm run check`, `npm run build`, locked Rust all-target tests, and optimized Rust release build all passed.
-- Complete local signed-webhook routing flow, consent enforcement, webhook delivery, acknowledgment, invalid/recovery paths, free limits, concurrency, restart persistence, encrypted customer payload storage, and key mode.
-- Live frontend asset hashes exactly match the local candidate build; live backend health identifies the candidate SHA.
-- Desktop and 390px mobile Chromium checks, keyboard skip-link/focus, reduced motion, axe (0 serious/critical; 0 total WCAG 2/2.1 A/AA violations), browser errors, response policies, privacy/outbound requests, caching, bundle sizes, and PWA offline reload.
+- Opened live desktop and 390 px phone contexts and checked first-screen wording/action, demo routes, populated-output availability, reset/isolation controls, keyboard focus, reduced motion, accessibility, privacy requests, offline recovery, links, legal pages, titles, and 404 behavior.
+- Compared the live health identity and frontend hashes with the last implementation candidate.
+- Used a clean detached worktree for dependency installation, tests, checks, builds, and a PORT-only release start.
+- Exercised isolated setup, authentication, consent, recipient/rule limits, signed intake, invalid/duplicate/unmatched paths, webhook delivery, populated UI, encrypted storage, restart persistence, and rate limiting.
+- Rechecked both earlier verification reports and recorded each prior blocker/limitation's current disposition.
+- Did not modify product code or live product data.
 
-Full exact commands, responses, hashes, limits, and caveats are in `.factory/verification-2.md`.
+## Verification summary
 
-## Re-run
+Passes: `npm test`, `npm run check`, `npm run build`, locked all-target Rust tests, release build, PORT-only binary start, live asset/SHA parity, axe, reduced motion, offline shell, privacy/terms links, local backend paths, persistence, encryption check, and current Lighthouse 100/100/100/100.
 
-```sh
-npm ci --prefix frontend
-npm test
-npm run check
-npm run build
-BUILD_SHA=$(git rev-parse HEAD) cargo test --all-targets --locked
-BUILD_SHA=$(git rev-parse HEAD) cargo build --release --locked
-```
+The documented Docker build was attempted after installing Docker, but the worker kernel rejected daemon `unshare`; the container run remains untested. The Dockerfile also has product-side contract defects recorded in F11.
 
-For the container path, run `docker build --build-arg BUILD_SHA=$(git rev-parse HEAD) -t service-notification-router .` and then check `/health`; Docker is not present in this verification container.
+## Known gaps and next steps
 
-## Known gaps
+The public deployment is uninitialized and claimable, has no demo, has no claims registry, defaults acknowledgment links to localhost, and does not meet the required rate-limit contract. Routing/title/focus, 404, first-screen, site structure, touch-target, metadata, copy-audit, Docker portability, and startup-log issues also remain.
 
-No product defects found. The only verification-environment limitation was the absence of Docker/Podman/Buildah and a Lighthouse CLI/Playwright Chromium CDP compatibility issue; deployment identity, browser audits, bundle measurements, and same-asset committed Lighthouse evidence compensate for those unavailable local tools.
+Implement every item F01–F14 in `.factory/review-1.md`, deploy a new candidate, and run a new strict review. PASS is not appropriate for the current product.
