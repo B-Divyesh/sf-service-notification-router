@@ -190,7 +190,10 @@ pub fn build_app(state: AppState, frontend_dir: &Path) -> Router {
         .route("/health", get(routes::health))
         .route("/api/status", get(routes::status))
         .route("/api/demo", post(routes::start_demo))
-        .route("/api/demo/{id}", get(routes::get_demo))
+        .route(
+            "/api/demo/{id}",
+            get(routes::get_demo).delete(routes::leave_demo),
+        )
         .route("/api/demo/{id}/reset", post(routes::reset_demo))
         .route("/api/setup", post(routes::setup))
         .route("/api/login", post(routes::login))
@@ -593,6 +596,29 @@ mod integration_tests {
         let body = json_body(started).await;
         assert_eq!(body["sample"]["events"].as_array().unwrap().len(), 3);
         assert_eq!(body["sample"]["metrics"]["received"], 3);
+        let workspace = body["workspace_id"].as_str().unwrap();
+        let left = app
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/demo/{workspace}"))
+                    .header("x-forwarded-for", "203.0.113.40")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(left.status(), StatusCode::NO_CONTENT);
+        let expired = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/demo/{workspace}"))
+                    .header("x-forwarded-for", "203.0.113.40")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(expired.status(), StatusCode::NOT_FOUND);
         let after = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM bookings")
             .fetch_one(&state.pool)
             .await

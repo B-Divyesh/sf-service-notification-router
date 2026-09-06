@@ -94,6 +94,15 @@ pub async fn reset_demo(
     ))
 }
 
+pub async fn leave_demo(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
+    state
+        .demo_workspaces
+        .lock()
+        .expect("demo workspace lock")
+        .remove(&id);
+    StatusCode::NO_CONTENT
+}
+
 #[derive(Deserialize)]
 pub struct SetupInput {
     business_name: String,
@@ -468,7 +477,7 @@ pub async fn receive_booking(
     let signature = headers
         .get("x-router-signature")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized)?;
+        .ok_or(AppError::Unauthorized)?;
     if !crypto::verify_signature(&secret, &body, signature) {
         return Err(AppError::Unauthorized);
     }

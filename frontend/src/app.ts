@@ -7,6 +7,7 @@ const sessionKey = "router_admin_session";
 const demoKey = "demo:service-notification-router:workspace";
 let token = sessionStorage.getItem(sessionKey) || "";
 let initialized = false;
+let focusRouteHeading = false;
 
 type ApiError = Error & { status?: number };
 type Recipient = { id: number; name: string; channel: "email" | "webhook"; destination: string; consent_confirmed: boolean; active: boolean };
@@ -41,16 +42,20 @@ function setMetadata(title: string, description: string): void {
   document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.setAttribute("href", `${location.origin}${location.pathname}`);
 }
 
-function finishRoute(title: string, description: string): void {
+function finishRoute(title: string, description: string, settleFocus = true): void {
   setMetadata(title, description);
   bindInternalLinks();
   const heading = document.querySelector<HTMLElement>("h1");
   const live = document.querySelector<HTMLElement>("#route-status");
   if (live && heading) live.textContent = heading.textContent || "Page loaded";
-  requestAnimationFrame(() => heading?.focus({ preventScroll: true }));
+  if (focusRouteHeading && settleFocus) {
+    focusRouteHeading = false;
+    requestAnimationFrame(() => heading?.focus({ preventScroll: true }));
+  }
 }
 
 function navigate(path: string, replace = false): void {
+  focusRouteHeading = true;
   if (replace) history.replaceState({}, "", path); else history.pushState({}, "", path);
   void route();
 }
@@ -67,12 +72,12 @@ function footer(): string {
   return `<footer class="public-footer"><span>Route booking notices to the responsible coordinator.</span><span class="footer-links"><a href="/privacy" data-link>Privacy</a><a href="/terms" data-link>Terms</a><span>Built by Param Factory</span><span>Version 1.1.0</span></span></footer>`;
 }
 
-function publicShell(content: string, action?: string, title = "Service Notification Router — Route booking notices", description = "Route each booking notice to the coordinator responsible for its service or provider."): void {
+function publicShell(content: string, action?: string, title = "Service Notification Router — Route booking notices", description = "Route each booking notice to the coordinator responsible for its service or provider.", settleFocus = true): void {
   app.innerHTML = `<div class="site-shell">${publicHeader(action)}<main id="main" class="public-main" tabindex="-1">${content}</main>${footer()}</div><div id="route-status" class="sr-only" aria-live="polite"></div><div class="toast-region" aria-live="polite" aria-atomic="true"></div>`;
-  finishRoute(title, description);
+  finishRoute(title, description, settleFocus);
 }
 
-function appShell(title: string, intro: string, content: string, action = ""): void {
+function appShell(title: string, intro: string, content: string, action = "", settleFocus = true): void {
   const current = location.pathname.slice(1) || "dashboard";
   const nav = [
     ["dashboard", "⌂", "Delivery board"], ["rules", "↗", "Routing rules"], ["recipients", "◎", "Recipients"], ["test", "◇", "Send a test"], ["settings", "⚙", "Settings"]
@@ -83,7 +88,7 @@ function appShell(title: string, intro: string, content: string, action = ""): v
     <div class="app-layout"><aside class="side-nav"><nav aria-label="Router">${nav}</nav></aside><main id="main" class="app-main" tabindex="-1"><div class="page-head"><div><p class="eyebrow">Administrator</p><h1 tabindex="-1">${escapeHtml(title)}</h1><p>${escapeHtml(intro)}</p></div>${action}</div>${content}</main></div>
     ${footer()}</div><div id="route-status" class="sr-only" aria-live="polite"></div><div class="toast-region" aria-live="polite" aria-atomic="true"></div>`;
   document.querySelector("#logout")?.addEventListener("click", () => { token = ""; sessionStorage.removeItem(sessionKey); navigate("/login"); });
-  finishRoute(`${title} — Service Notification Router`, intro);
+  finishRoute(`${title} — Service Notification Router`, intro, settleFocus);
 }
 
 function toast(message: string): void {
@@ -108,9 +113,6 @@ function bindInternalLinks(): void {
     if (link.origin !== location.origin) return;
     event.preventDefault(); navigate(`${link.pathname}${link.search}`);
   }));
-  document.querySelector<HTMLAnchorElement>(".skip-link")?.addEventListener("click", () => {
-    requestAnimationFrame(() => document.querySelector<HTMLElement>("#main")?.focus());
-  });
 }
 
 function previewRows(events: EventItem[]): string {
@@ -137,7 +139,7 @@ function landing(): void {
 }
 
 async function demoPage(reset = false): Promise<void> {
-  publicShell(`<section class="auth-sheet"><p class="eyebrow">Sample workspace</p><h1 tabindex="-1">Loading sample bookings</h1><p role="status">Preparing an isolated routing board.</p></section>`, "Sign in", "Demo — Service Notification Router", "Try a populated booking notification routing board without changing real data.");
+  publicShell(`<section class="auth-sheet"><p class="eyebrow">Sample workspace</p><h1 tabindex="-1">Loading sample bookings</h1><p role="status">Preparing an isolated routing board.</p></section>`, "Sign in", "Demo — Service Notification Router", "Try a populated booking notification routing board without changing real data.", false);
   try {
     let workspace = sessionStorage.getItem(demoKey);
     let result: DemoResponse;
@@ -154,7 +156,14 @@ async function demoPage(reset = false): Promise<void> {
       <section aria-labelledby="sample-handoffs"><div class="section-head"><h2 id="sample-handoffs">Sample handoffs</h2></div><ul class="ticket-list">${previewRows(s.events)}</ul></section>
       <div class="demo-columns"><section class="panel"><h2>Sample routing rules</h2><ol class="simple-list">${s.rules.map(rule => `<li><strong>${escapeHtml(rule.match_field)}: ${escapeHtml(rule.match_value)}</strong><span>Send to ${escapeHtml(rule.recipient_name)} · priority ${rule.priority}</span></li>`).join("")}</ol></section><section class="panel"><h2>Sample recipients</h2><ul class="simple-list">${s.recipients.map(recipient => `<li><strong>${escapeHtml(recipient.name)}</strong><span>${escapeHtml(recipient.channel)} · ${escapeHtml(recipient.destination)}</span></li>`).join("")}</ul></section></div>`, "Sign in", "Demo — Service Notification Router", "Try a populated booking notification routing board without changing real data.");
     document.querySelector("#reset-demo")?.addEventListener("click", () => void demoPage(true));
-    document.querySelector("#start-real")?.addEventListener("click", () => { sessionStorage.removeItem(demoKey); navigate("/"); });
+    document.querySelector("#start-real")?.addEventListener("click", async event => {
+      const button = event.currentTarget as HTMLButtonElement;
+      button.disabled = true;
+      try { await api(`/api/demo/${encodeURIComponent(result.workspace_id)}`, { method: "DELETE" }); }
+      catch { /* The private workspace still expires automatically. */ }
+      sessionStorage.removeItem(demoKey);
+      navigate("/");
+    });
   } catch (error) {
     publicShell(`<div class="empty"><div class="stamp">!</div><h1 tabindex="-1">The sample could not load</h1><p>${escapeHtml(error instanceof Error ? error.message : "The demo service did not respond.")}</p><button class="button" id="demo-retry">Try the sample again</button></div>`, "Sign in", "Demo — Service Notification Router", "Try a populated booking notification routing board without changing real data.");
     document.querySelector("#demo-retry")?.addEventListener("click", () => void demoPage());
@@ -177,7 +186,7 @@ function loginPage(): void {
   document.querySelector<HTMLFormElement>("#login-form")?.addEventListener("submit", async event => { event.preventDefault(); const form=event.currentTarget as HTMLFormElement; setBusy(form,true); const password=String(new FormData(form).get("password")||""); try{const result=await api<{token:string}>("/api/login",{method:"POST",body:JSON.stringify({password})});token=result.token;sessionStorage.setItem(sessionKey,token);navigate("/dashboard");}catch(error){showFormError(form,error);}finally{setBusy(form,false);} });
 }
 
-function loadingPage(title: string, intro: string): void { appShell(title,intro,`<div class="empty" aria-busy="true"><div class="stamp">…</div><h2>Loading current data</h2><p>Reading the latest state from your router.</p></div>`); }
+function loadingPage(title: string, intro: string): void { appShell(title,intro,`<div class="empty" aria-busy="true"><div class="stamp">…</div><h2>Loading current data</h2><p>Reading the latest state from your router.</p></div>`, "", false); }
 
 async function dashboardPage(): Promise<void> {
   loadingPage("Delivery board", "Review booking handoffs and outcomes that need attention.");
@@ -254,7 +263,7 @@ function legalPage(kind:"privacy"|"terms"):void{
 }
 
 async function ackPage(tokenPart:string):Promise<void>{
-  publicShell(`<section class="auth-sheet"><p class="eyebrow">Booking acknowledgment</p><h1 tabindex="-1">Loading this booking notice</h1><p role="status">Checking the acknowledgment link.</p></section>`,"Sign in","Acknowledge booking — Service Notification Router","Acknowledge responsibility for one routed booking notice.");
+  publicShell(`<section class="auth-sheet"><p class="eyebrow">Booking acknowledgment</p><h1 tabindex="-1">Loading this booking notice</h1><p role="status">Checking the acknowledgment link.</p></section>`,"Sign in","Acknowledge booking — Service Notification Router","Acknowledge responsibility for one routed booking notice.",false);
   try{const info=await api<{service:string;starts_at?:string;status:string;acknowledged_at?:string}>(`/api/ack/${encodeURIComponent(tokenPart)}`);publicShell(`<section class="auth-sheet"><p class="eyebrow">Booking acknowledgment</p><h1 tabindex="-1">${info.status==="acknowledged"?"Booking already acknowledged":"Acknowledge this booking"}</h1><p class="lede"><strong>${escapeHtml(info.service)}</strong>${info.starts_at?` · ${formatDate(info.starts_at)}`:""}</p><p>This confirms responsibility for the notice. It does not change the appointment.</p>${info.status==="acknowledged"?`<div class="notice success"><strong>Acknowledged.</strong> ${formatDate(info.acknowledged_at)}.</div>`:`<button class="button" id="acknowledge">Acknowledge booking</button>`}</section>`,"Sign in","Acknowledge booking — Service Notification Router","Acknowledge responsibility for one routed booking notice.");document.querySelector("#acknowledge")?.addEventListener("click",async event=>{const button=event.currentTarget as HTMLButtonElement;button.disabled=true;try{await api(`/api/ack/${encodeURIComponent(tokenPart)}`,{method:"POST"});await ackPage(tokenPart);}catch(error){toast(error instanceof Error?error.message:"Acknowledgment failed.");button.disabled=false;}});}catch(error){publicShell(`<section class="auth-sheet"><p class="eyebrow">Booking acknowledgment</p><h1 tabindex="-1">This link is unavailable</h1><p class="error-text">${escapeHtml(error instanceof Error?error.message:"The acknowledgment link is invalid.")}</p><p>Ask the booking administrator to resend the notice.</p></section>`,"Sign in","Link unavailable — Service Notification Router","This booking acknowledgment link is invalid or expired.");}
 }
 
@@ -284,7 +293,13 @@ async function boot():Promise<void>{
 
 function registerServiceWorker(): void { if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{}); }
 
-window.addEventListener("popstate",()=>void route());
+document.querySelector<HTMLAnchorElement>(".skip-link")?.addEventListener("click", event => {
+  event.preventDefault();
+  const main = document.querySelector<HTMLElement>("#main");
+  main?.focus();
+  main?.scrollIntoView();
+});
+window.addEventListener("popstate",()=>{focusRouteHeading=true;void route();});
 window.addEventListener("online",()=>{document.querySelector<HTMLElement>("#offline")?.setAttribute("hidden","");toast("Back online.");});
 window.addEventListener("offline",()=>document.querySelector<HTMLElement>("#offline")?.removeAttribute("hidden"));
 void boot();

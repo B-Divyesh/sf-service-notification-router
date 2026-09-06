@@ -70,6 +70,7 @@ test("@claim:demo-isolation reset stays in the sample API namespace", async ({ p
   expect(apiPaths.every(path => path.startsWith("/api/demo"))).toBe(true);
   await page.getByRole("button", { name: "Start for real" }).click();
   await expect(page).toHaveURL(`${baseURL}/`);
+  expect(apiPaths.some(path => /^\/api\/demo\/[^/]+$/.test(path))).toBe(true);
 });
 
 test("@claim:privacy-network landing and demo use no tracker or CDN requests", async ({ page }) => {
@@ -85,8 +86,9 @@ test("@claim:offline-recovery an offline reload shows a clear retry screen", asy
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto("/");
-  await page.waitForFunction(() => navigator.serviceWorker?.controller !== null || document.readyState === "complete");
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await page.reload();
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "The router is offline" })).toBeVisible();
@@ -248,8 +250,13 @@ test.describe.serial("real router claim outcomes", () => {
 
 test("site routes have titles, focus, touch targets, and a designed 404", async ({ page }) => {
   for (const [path, title] of [["/privacy", "Privacy — Service Notification Router"], ["/terms", "Terms — Service Notification Router"], ["/demo", "Demo — Service Notification Router"]]) {
-    await page.goto(path); await expect(page).toHaveTitle(title); await expect(page.locator("h1")).toBeFocused();
+    await page.goto(path); await expect(page).toHaveTitle(title);
   }
+  await page.goto("/"); await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Privacy" }).click(); await expect(page.locator("h1")).toBeFocused();
+  await page.goBack(); await expect(page.locator("h1")).toBeFocused();
+  await page.getByRole("link", { name: "Try it with sample data" }).click(); await expect(page.getByRole("heading", { name: "Review routed booking notices" })).toBeFocused();
+  await page.goto("/"); await expect(page.getByRole("heading", { name: "Route each booking to its coordinator" })).toBeVisible(); await page.keyboard.press("Tab"); await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await page.keyboard.press("Enter"); await expect(page.locator("#main")).toBeFocused();
   const response = await page.goto("/definitely-missing"); expect(response?.status()).toBe(404); await expect(page.getByRole("heading", { name: "This route does not exist" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 }); await page.goto("/privacy");
   for (const link of await page.locator("footer a").all()) expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);

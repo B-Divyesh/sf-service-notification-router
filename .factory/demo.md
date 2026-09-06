@@ -12,7 +12,9 @@ The demo contains three bookings for Harbor Health:
 It also contains two recipients and two routing rules. The banner reads **Demo
 — sample data, nothing is saved** on every demo screen. **Reset demo** restores
 the original sample. **Start for real** discards the browser's sample workspace
-identifier and returns to the real entry point.
+identifier, deletes the in-memory workspace, and returns to the real entry
+point. If that deletion request cannot reach the server, the workspace still
+expires after 24 hours.
 
 `POST /api/demo` creates a random in-memory workspace with a 24-hour TTL. The
 identifier is stored in `sessionStorage` under
