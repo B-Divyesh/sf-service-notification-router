@@ -20,12 +20,24 @@ pub fn load_or_create_key(path: &Path) -> anyhow::Result<[u8; 32]> {
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
     fs::write(path, key)?;
+    restrict_permissions(path)?;
+    Ok(key)
+}
+
+pub fn restrict_permissions(path: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
+        use std::io::ErrorKind;
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        if let Err(error) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
+            if error.kind() == ErrorKind::PermissionDenied {
+                tracing::warn!("data filesystem does not support POSIX private file modes; relying on the private product mount");
+            } else {
+                return Err(error.into());
+            }
+        }
     }
-    Ok(key)
+    Ok(())
 }
 
 pub fn encrypt(key: &[u8; 32], value: &[u8]) -> anyhow::Result<String> {

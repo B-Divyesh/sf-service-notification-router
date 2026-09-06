@@ -337,11 +337,7 @@ fn load_or_create_bootstrap_proof(data_dir: &Path) -> anyhow::Result<(String, &'
     if source == "supplied" || !path.exists() {
         std::fs::write(&path, proof.as_bytes())?;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    crypto::restrict_permissions(&path)?;
     Ok((proof, source))
 }
 
