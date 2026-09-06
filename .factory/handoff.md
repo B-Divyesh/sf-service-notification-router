@@ -2,35 +2,35 @@
 
 ## Status
 
-Independent verification 4 **PASSed** on 2026-09-06. There are zero findings
-and zero untested claims. The deployed product is at
-<https://service-notification-router.sociobot.in>.
+Strict review 2 **PASSed** on 2026-09-06 with zero findings at every severity
+and zero untested public claims. No product code changed during this review.
 
-- Product implementation: `122604d8c1a63d7f5082b791b46ea96e492a5d4a`
-- Documentation and deployed health build:
-  `a92cc9efd0b18b063bb9dc6a6373232a61f13e32`
-- Difference between those commits: documentation only (`.factory/handoff.md`)
-- Live assets exactly match a clean build of the reviewed code
-- Full verification: `.factory/verification-4.md`
+- Live product: <https://service-notification-router.sociobot.in>
+- Implementation reviewed: `122604d8c1a63d7f5082b791b46ea96e492a5d4a`
+- Documentation baseline reviewed: `10ebb30d0f28e2a23ecccb7bde620fd5996b3ff8`
+- Live health build: `a92cc9efd0b18b063bb9dc6a6373232a61f13e32`
+- Full report: `.factory/review-2.md`
 
-## What is verified
+The implementation-to-documentation diff contains reports only. Fresh local
+JavaScript and CSS hashes exactly match the deployed assets.
 
-- Phone and desktop first screens name the routing job, intended offices, and
-  **Try it with sample data** action before scrolling.
-- The one-click demo contains realistic routing outcomes, keeps the persistent
-  sample-data label, resets, exits, deletes its in-memory workspace, and does
-  not change the real SQLite workspace.
-- Every visible link and button on `/`, `/demo`, `/privacy`, and `/terms` is at
-  least 44 × 44 CSS px at 390 × 844 and 1440 × 900. This closes V3-01.
-- Keyboard skip/focus, route/back focus, reduced motion, offline recovery,
-  axe scans, legal routes, designed 404, metadata, same-origin privacy, and
-  ordinary-load console checks pass.
-- The live rate limiter allows 120 `/api/status` requests for one forwarded
-  client, then returns 429 with `Retry-After: 60`; another forwarded client has
-  its own allowance.
-- The real live workspace was uninitialized before and after the QA demo.
+## What was verified
 
-## How to run and verify
+- Phone and desktop first screens show the routing job, intended offices, and
+  **Try it with sample data** before scrolling.
+- The demo shows three realistic booking outcomes, keeps its sample label,
+  resets, deletes its workspace on exit, and leaves real status uninitialized.
+- Every visible control on `/`, `/demo`, `/privacy`, and `/terms` meets the
+  44 × 44 CSS-pixel minimum at 390 × 844 and 1440 × 900.
+- Axe, keyboard, route/back focus, reduced motion, offline recovery, legal
+  routes, metadata, designed 404, same-origin privacy, and console checks pass.
+- Live rate limiting allows 120 status requests for one forwarded client, then
+  returns 429 with `Retry-After: 60`; another client has its own allowance.
+- All 18 declared claim commands passed separately.
+- Fresh live Lighthouse scores: Performance 100, Accessibility 100, Best
+  Practices 100, SEO 100; LCP 1.201 s, CLS 0, TBT 12.5 ms.
+
+## How to verify
 
 ```sh
 npm ci --prefix frontend
@@ -41,27 +41,29 @@ cargo test --all-targets --locked
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Run each command in `.factory/claims.json` separately from the same clean
-setup. All 18 passed in verification 4. Open `/demo` for the isolated sample.
-For local runtime use `DATA_DIR=./data PUBLIC_BASE_URL=http://localhost:8080
-cargo run`; the normal container contract needs only `PORT` and uses `/data`
-when it is mounted.
+Run every `test` command in `.factory/claims.json` separately. Open `/demo` for
+the isolated sample. `/opt/fleet/lib/verify-url.sh` can check the deployed
+landing structure and ordinary-load console state.
 
-## Runtime and deployment notes
+For local runtime use:
 
-- Keep one replica while SQLite uses the product-private Azure Files mount at
-  `/data`. Do not remove that data directory during redeploys.
-- The server generates protected setup material at first boot when it is not
-  supplied. Do not log or publish it.
-- The locally available worker has no Docker daemon. The deployed immutable
-  image and the PORT-only runtime-persistence claim cover the container path.
+```sh
+DATA_DIR=./data PUBLIC_BASE_URL=http://localhost:8080 cargo run
+```
 
-## External dependencies and next steps
+The normal container starts with only `PORT`, uses `/data` when mounted, and
+generates protected setup material without printing secret values.
 
-- The free core is ready. The advertised $39 USD one-time unlimited-routing
-  offer still awaits separate Sociobot billing registration; do not claim that
-  checkout is available until it is registered.
-- Email delivery needs an operator-provided SMTP relay. Webhook delivery works
-  without it and failed email notices remain retryable.
-- Retain this report and `/work/.evidence/qa-report.md` as the evidence for
-  verification 4.
+## Runtime notes
+
+- Keep one replica while SQLite uses the product-private `/data` mount.
+- Preserve the SQLite database, encryption key, and setup code together.
+- Do not expose the generated setup proof or remove the persistent data mount.
+- Billing registration is still pending. Do not claim checkout is available.
+- Email needs an operator-supplied SMTP relay. Webhook delivery works without
+  that optional relay.
+
+## Remaining work
+
+No product defect remains. Billing registration and SMTP configuration are
+operator tasks outside this review.
