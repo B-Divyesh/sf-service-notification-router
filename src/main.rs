@@ -82,20 +82,31 @@ async fn main() -> anyhow::Result<()> {
     }));
     std::fs::create_dir_all(&data_dir)?;
     let legacy_db_path = data_dir.join("router.db");
-    let current_db_path = data_dir.join("router.sqlite3");
-    let db_path = if current_db_path.exists()
-        || !legacy_db_path.exists()
-        || legacy_db_path.metadata()?.len() == 0
-    {
+    let prior_db_path = data_dir.join("router.sqlite3");
+    let current_db_path = data_dir.join("router.storage.sqlite3");
+    let db_path = if current_db_path.exists() {
         current_db_path
-    } else {
+    } else if prior_db_path
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() > 0)
+    {
+        prior_db_path
+    } else if legacy_db_path
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() > 0)
+    {
         legacy_db_path
+    } else {
+        current_db_path
     };
-    let database_existed = db_path.exists();
     let database_url = format!("sqlite://{}", db_path.display());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
         .foreign_keys(true)
+        // The fleet's private Azure Files mount does not provide SQLite with
+        // usable byte-range locks. This VFS is safe because deployment is
+        // deliberately bounded to one process and one replica.
+        .vfs("unix-none")
         .busy_timeout(Duration::from_secs(30));
     let pool = SqlitePoolOptions::new()
         // Azure Files exposes SQLite through SMB. One connection keeps its
@@ -103,13 +114,8 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(1)
         .connect_with(options)
         .await?;
-    let migration_source = if database_existed {
-        spawn_migration_retry(pool.clone());
-        "background_existing"
-    } else {
-        sqlx::migrate!().run(&pool).await?;
-        "synchronous_new"
-    };
+    sqlx::migrate!().run(&pool).await?;
+    let migration_source = "synchronous";
     let key_path = data_dir.join("router.key");
     let encryption_key_source = if key_path.exists() {
         "persisted"
@@ -373,6 +379,9 @@ async fn cache_headers(request: Request<Body>, next: Next) -> Response {
 fn spawn_maintenance(state: AppState) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
+        // `interval` ticks immediately once. Consume that tick so startup
+        // schema work and the first maintenance pass never overlap.
+        tick.tick().await;
         loop {
             tick.tick().await;
             if let Err(error) = routes::purge_expired(&state).await {
@@ -385,25 +394,6 @@ fn spawn_maintenance(state: AppState) {
                 .fetch_all(&state.pool).await.unwrap_or_default();
             for id in ids {
                 delivery::deliver_notification(&state, id).await;
-            }
-        }
-    });
-}
-
-fn spawn_migration_retry(pool: SqlitePool) {
-    tokio::spawn(async move {
-        let mut attempt = 0_u32;
-        loop {
-            attempt += 1;
-            match sqlx::migrate!().run(&pool).await {
-                Ok(()) => {
-                    tracing::info!(attempt, "database migrations ready");
-                    return;
-                }
-                Err(error) => {
-                    tracing::warn!(attempt, %error, "database migration deferred during revision handoff");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
             }
         }
     });

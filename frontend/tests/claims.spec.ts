@@ -25,7 +25,10 @@ function claimDataDir(): string {
 function claimDatabase(): string {
   const dir = claimDataDir();
   const files = readdirSync(dir);
-  return join(dir, files.includes("router.sqlite3") ? "router.sqlite3" : "router.db");
+  for (const name of ["router.storage.sqlite3", "router.sqlite3", "router.db"]) {
+    if (files.includes(name) && statSync(join(dir, name)).size > 0) return join(dir, name);
+  }
+  throw new Error("The test runtime did not create a populated SQLite database.");
 }
 
 async function postSigned(api: APIRequestContext, secret: string, booking: Record<string, unknown>) {
@@ -131,7 +134,7 @@ test("@claim:runtime-persistence a PORT-only process protects setup and keeps SQ
     const proof = readFileSync(proofPath, "utf8").trim();
     const setup = await fetch(`${serviceURL}/api/setup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ business_name: "Persistent Clinic", password: "correct horse battery", retention_hours: 24, setup_proof: proof }) }); expect(setup.status).toBe(201);
     child.kill("SIGTERM"); await new Promise(resolveExit => child.once("exit", resolveExit));
-    const database = join(work, "data/router.sqlite3");
+    const database = join(work, "data/router.storage.sqlite3");
     const locker = spawn("python3", ["-u", "-c", "import sqlite3,sys,time; db=sqlite3.connect(sys.argv[1]); db.execute('BEGIN EXCLUSIVE'); print('locked', flush=True); time.sleep(3); db.commit()", database], { stdio: ["ignore", "pipe", "pipe"] });
     const lockerDone = new Promise(resolveExit => locker.once("exit", resolveExit));
     await new Promise<void>((resolveLock, rejectLock) => { locker.stdout?.once("data", () => resolveLock()); locker.once("error", rejectLock); });
