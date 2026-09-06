@@ -124,7 +124,12 @@ test("@claim:runtime-persistence a PORT-only process protects setup and keeps SQ
     await waitForHealth(); const proofPath = join(work, "data/router.setup-code"); expect(statSync(proofPath).mode & 0o777).toBe(0o600);
     const proof = readFileSync(proofPath, "utf8").trim();
     const setup = await fetch(`${serviceURL}/api/setup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ business_name: "Persistent Clinic", password: "correct horse battery", retention_hours: 24, setup_proof: proof }) }); expect(setup.status).toBe(201);
-    child.kill("SIGTERM"); await new Promise(resolveExit => child.once("exit", resolveExit)); child = start(); await waitForHealth();
+    child.kill("SIGTERM"); await new Promise(resolveExit => child.once("exit", resolveExit));
+    const database = join(work, "data/router.db");
+    const locker = spawn("python3", ["-u", "-c", "import sqlite3,sys,time; db=sqlite3.connect(sys.argv[1]); db.execute('BEGIN EXCLUSIVE'); print('locked', flush=True); time.sleep(1.5); db.commit()", database], { stdio: ["ignore", "pipe", "pipe"] });
+    const lockerDone = new Promise(resolveExit => locker.once("exit", resolveExit));
+    await new Promise<void>((resolveLock, rejectLock) => { locker.stdout?.once("data", () => resolveLock()); locker.once("error", rejectLock); });
+    child = start(); await waitForHealth(); await lockerDone;
     expect((await (await fetch(`${serviceURL}/api/status`)).json()).initialized).toBe(true);
     expect((await fetch(`${serviceURL}/api/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "correct horse battery" }) })).status).toBe(200);
     expect(output).toContain("configuration ready"); expect(output).not.toContain(proof);

@@ -85,7 +85,8 @@ async fn main() -> anyhow::Result<()> {
     let database_url = format!("sqlite://{}", db_path.display());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .busy_timeout(Duration::from_secs(30));
     let pool = SqlitePoolOptions::new()
         .max_connections(8)
         .connect_with(options)
