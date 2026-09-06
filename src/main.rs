@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
     }));
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("router.db");
+    let database_existed = db_path.exists();
     let database_url = format!("sqlite://{}", db_path.display());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
@@ -91,7 +92,13 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(8)
         .connect_with(options)
         .await?;
-    sqlx::migrate!().run(&pool).await?;
+    let migration_source = if database_existed {
+        spawn_migration_retry(pool.clone());
+        "background_existing"
+    } else {
+        sqlx::migrate!().run(&pool).await?;
+        "synchronous_new"
+    };
     let key_path = data_dir.join("router.key");
     let encryption_key_source = if key_path.exists() {
         "persisted"
@@ -140,6 +147,7 @@ async fn main() -> anyhow::Result<()> {
         },
         encryption_key_source,
         bootstrap_proof_source,
+        migration_source,
         public_base_url_source = if public_base_url_supplied.is_some() {
             "supplied"
         } else {
@@ -370,6 +378,25 @@ fn spawn_maintenance(state: AppState) {
                 .fetch_all(&state.pool).await.unwrap_or_default();
             for id in ids {
                 delivery::deliver_notification(&state, id).await;
+            }
+        }
+    });
+}
+
+fn spawn_migration_retry(pool: SqlitePool) {
+    tokio::spawn(async move {
+        let mut attempt = 0_u32;
+        loop {
+            attempt += 1;
+            match sqlx::migrate!().run(&pool).await {
+                Ok(()) => {
+                    tracing::info!(attempt, "database migrations ready");
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!(attempt, %error, "database migration deferred during revision handoff");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
             }
         }
     });
