@@ -89,7 +89,9 @@ async fn main() -> anyhow::Result<()> {
         .foreign_keys(true)
         .busy_timeout(Duration::from_secs(30));
     let pool = SqlitePoolOptions::new()
-        .max_connections(8)
+        // Azure Files exposes SQLite through SMB. One connection keeps its
+        // file lock semantics predictable and matches the one-replica deploy.
+        .max_connections(1)
         .connect_with(options)
         .await?;
     let migration_source = if database_existed {
